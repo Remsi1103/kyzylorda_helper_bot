@@ -6,24 +6,16 @@ import os
 from flask import Flask
 from threading import Thread
 
-# 🔑 Токен и ID
 TOKEN = os.getenv("TOKEN")
 bot = telebot.TeleBot(TOKEN)
-ADMIN_ID = 6864791335  # замени на свой ID
+
+# Админ ID для управления ботом
+ADMIN_ID = 6864791335  # ← замени на свой Telegram ID
 CHANNEL_ID = "@kyzylorda_helper_channel"
+KASPI_CARD = "4400430247434142"
+PRICE = 500
 
-# 🗃️ База данных
-conn = sqlite3.connect("ads.db", check_same_thread=False)
-cursor = conn.cursor()
-cursor.execute('''CREATE TABLE IF NOT EXISTS ads
-                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                   user_id INTEGER,
-                   category TEXT,
-                   text TEXT,
-                   is_paid INTEGER)''')
-conn.commit()
-
-# 🌐 Flask
+# Flask для UptimeRobot
 app = Flask(__name__)
 
 @app.route('/')
@@ -33,105 +25,130 @@ def home():
 def run_flask():
     app.run(host="0.0.0.0", port=8080)
 
-Thread(target=run_flask).start()
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.start()
 
-# 🌍 Выбор языка
-user_language = {}
+# Подключение к SQLite
+conn = sqlite3.connect('ads.db', check_same_thread=False)
+cursor = conn.cursor()
 
-def get_text(user_id, ru, kz):
-    return ru if user_language.get(user_id) == 'ru' else kz
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS ads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    category TEXT,
+    text TEXT,
+    is_paid INTEGER DEFAULT 0
+)
+''')
+conn.commit()
+
+user_lang = {}
+pending_paid_ads = {}
+
+def main_menu(lang):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    if lang == "kz":
+        markup.row("📢 Жұмыс", "🏠 Жалдау")
+        markup.row("➕ Хабарландыру қосу", "📋 Менің хабарландыруларым")
+        markup.row("ℹ️ Көмек", "💰 Ақылы хабарландыру")
+    else:
+        markup.row("📢 Вакансии", "🏠 Аренда")
+        markup.row("➕ Добавить объявление", "📋 Мои объявления")
+        markup.row("ℹ️ Помощь", "💰 Платное объявление")
+    return markup
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add(types.KeyboardButton("Русский 🇷🇺"), types.KeyboardButton("Қазақша 🇰🇿"))
-    bot.send_message(message.chat.id, "👋 Тілді таңдаңыз / Выберите язык:", reply_markup=markup)
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru"))
+    markup.add(types.InlineKeyboardButton("🇰🇿 Қазақша", callback_data="lang_kz"))
+    bot.send_message(message.chat.id, "👋 Добро пожаловать в Kyzylorda Helper!\nТілді таңдаңыз / Выберите язык:", reply_markup=markup)
 
-@bot.message_handler(func=lambda m: m.text in ["Русский 🇷🇺", "Қазақша 🇰🇿"])
-def set_language(message):
-    user_language[message.from_user.id] = 'ru' if message.text == "Русский 🇷🇺" else 'kz'
-    show_main_menu(message)
+@bot.callback_query_handler(func=lambda call: call.data.startswith("lang_"))
+def choose_language(call):
+    lang = call.data.split("_")[1]
+    user_lang[call.from_user.id] = lang
+    text = "✅ Қазақ тілі таңдалды." if lang == "kz" else "✅ Русский язык выбран."
+    bot.send_message(call.message.chat.id, text, reply_markup=main_menu(lang))
 
-def show_main_menu(message):
-    lang = user_language.get(message.from_user.id, 'ru')
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("📢 Вакансии" if lang == 'ru' else "📢 Жұмыс")
-    markup.add("🏠 Аренда" if lang == 'ru' else "🏠 Жалға беру")
-    markup.add("➕ Добавить объявление" if lang == 'ru' else "➕ Хабарландыру қосу")
-    markup.add("💰 Платное объявление" if lang == 'ru' else "💰 Ақылы хабарландыру")
-    markup.add("📋 Мои объявления" if lang == 'ru' else "📋 Менің хабарландыруларым")
-    markup.add("ℹ️ Помощь" if lang == 'ru' else "ℹ️ Көмек")
-    if message.from_user.id == ADMIN_ID:
-        markup.add("🔧 Админ-панель")
-    welcome = "👋 Добро пожаловать в Kyzylorda Helper!" if lang == 'ru' else "👋 Kyzylorda Helper-ге қош келдіңіз!"
-    bot.send_message(message.chat.id, welcome, reply_markup=markup)
-
-@bot.message_handler(func=lambda m: m.text in ["📢 Вакансии", "📢 Жұмыс"])
-def show_jobs(message):
-    cursor.execute("SELECT text FROM ads WHERE category = 'vacancy'")
-    ads = cursor.fetchall()
-    if not ads:
-        bot.send_message(message.chat.id, get_text(message.from_user.id, "Нет вакансий.", "Жұмыс табылмады."))
+@bot.message_handler(content_types=['photo'])
+def handle_photo(message):
+    if message.chat.id == ADMIN_ID and message.reply_to_message:
+        ad_text = message.reply_to_message.text
+        bot.send_message(CHANNEL_ID, "💰 Платное объявление\n\n" + ad_text)
     else:
-        for ad in ads:
-            bot.send_message(message.chat.id, ad[0])
+        bot.send_message(ADMIN_ID, f"🖼 Скрин оплаты от @{message.from_user.username or message.from_user.id}")
+        bot.forward_message(ADMIN_ID, message.chat.id, message.message_id)
 
-@bot.message_handler(func=lambda m: m.text in ["🏠 Аренда", "🏠 Жалға беру"])
-def show_rent(message):
-    cursor.execute("SELECT text FROM ads WHERE category = 'rent'")
-    ads = cursor.fetchall()
-    if not ads:
-        bot.send_message(message.chat.id, get_text(message.from_user.id, "Нет объявлений по аренде.", "Жалға беру хабарландырулары жоқ."))
+@bot.message_handler(func=lambda message: True)
+def handle_text(message):
+    lang = user_lang.get(message.from_user.id, "ru")
+    text = message.text
+
+    if lang == "kz":
+        if text == "📢 Жұмыс":
+            bot.send_message(message.chat.id, "Мұнда жұмыстар көрсетіледі.")
+        elif text == "🏠 Жалдау":
+            bot.send_message(message.chat.id, "Мұнда жалға алу ұсыныстары көрсетіледі.")
+        elif text == "➕ Хабарландыру қосу":
+            bot.send_message(message.chat.id, "Хабарландыру мәтінін жіберіңіз:")
+            bot.register_next_step_handler(message, lambda msg: save_ad(msg, "kz", is_paid=False))
+        elif text == "💰 Ақылы хабарландыру":
+            bot.send_message(message.chat.id, f"💳 Ақылы жарнама үшін {PRICE}₸ төлеңіз:\nKaspi: {KASPI_CARD}\n\n📸 Төлем скриншотын жіберіңіз.")
+            bot.send_message(message.chat.id, "Хабарландыру мәтінін жіберіңіз:")
+            bot.register_next_step_handler(message, lambda msg: save_ad(msg, "kz", is_paid=True))
+        elif text == "📋 Менің хабарландыруларым":
+            show_user_ads(message, lang)
+        elif text == "ℹ️ Көмек":
+            bot.send_message(message.chat.id, "Бұл бот арқылы сіз хабарландырулар қосып, көруіңізге болады.")
+        else:
+            bot.send_message(message.chat.id, "Түсінбедім. Басты мәзірден таңдаңыз.", reply_markup=main_menu(lang))
     else:
-        for ad in ads:
-            bot.send_message(message.chat.id, ad[0])
+        if text == "📢 Вакансии":
+            bot.send_message(message.chat.id, "Здесь будут отображаться вакансии.")
+        elif text == "🏠 Аренда":
+            bot.send_message(message.chat.id, "Здесь будут показываться объявления по аренде.")
+        elif text == "➕ Добавить объявление":
+            bot.send_message(message.chat.id, "Пожалуйста, отправьте текст объявления:")
+            bot.register_next_step_handler(message, lambda msg: save_ad(msg, "ru", is_paid=False))
+        elif text == "💰 Платное объявление":
+            bot.send_message(message.chat.id, f"💳 Для платного объявления переведите {PRICE}₸ на Kaspi:\n{KASPI_CARD}\n\n📸 Отправьте скрин оплаты сюда.")
+            bot.send_message(message.chat.id, "Отправьте текст платного объявления:")
+            bot.register_next_step_handler(message, lambda msg: save_ad(msg, "ru", is_paid=True))
+        elif text == "📋 Мои объявления":
+            show_user_ads(message, lang)
+        elif text == "ℹ️ Помощь":
+            bot.send_message(message.chat.id, "С помощью этого бота вы можете размещать и просматривать объявления.")
+        else:
+            bot.send_message(message.chat.id, "Я не понял. Выберите из меню.", reply_markup=main_menu(lang))
 
-@bot.message_handler(func=lambda m: m.text in ["➕ Добавить объявление", "➕ Хабарландыру қосу"])
-def ask_category(message):
-    lang = user_language.get(message.from_user.id, 'ru')
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("📢 Вакансии" if lang == 'ru' else "📢 Жұмыс")
-    markup.add("🏠 Аренда" if lang == 'ru' else "🏠 Жалға беру")
-    bot.send_message(message.chat.id, get_text(message.from_user.id, "Выберите категорию:", "Санатты таңдаңыз:"), reply_markup=markup)
-    bot.register_next_step_handler(message, get_ad_text)
-
-def get_ad_text(message):
-    category = 'vacancy' if "Вакансии" in message.text or "Жұмыс" in message.text else 'rent'
-    bot.send_message(message.chat.id, get_text(message.from_user.id, "Отправьте текст объявления:", "Хабарландыру мәтінін жіберіңіз:"))
-    bot.register_next_step_handler(message, save_ad, category)
-
-def save_ad(message, category):
-    cursor.execute("INSERT INTO ads (user_id, category, text, is_paid) VALUES (?, ?, ?, ?)",
-                   (message.from_user.id, category, message.text, 0))
+def save_ad(message, lang, is_paid):
+    user_id = message.from_user.id
+    text = message.text
+    cursor.execute("INSERT INTO ads (user_id, text, category, is_paid) VALUES (?, ?, ?, ?)", (user_id, text, "", int(is_paid)))
     conn.commit()
-    bot.send_message(message.chat.id, get_text(message.from_user.id, "✅ Объявление сохранено.", "✅ Хабарландыру сақталды."))
 
-@bot.message_handler(func=lambda m: m.text in ["💰 Платное объявление", "💰 Ақылы хабарландыру"])
-def paid_ad(message):
-    text = get_text(message.from_user.id,
-        "💰 Для размещения платного объявления отправьте 1000₸ на Kaspi:\n📱 +7 777 777 7777\nПосле оплаты отправьте скриншот сюда.",
-        "💰 Ақылы хабарландыру үшін Kaspi-ге 1000₸ жіберіңіз:\n📱 +7 777 777 7777\nТөлем жасаған соң скриншот жіберіңіз.")
-    bot.send_message(message.chat.id, text)
+    if is_paid:
+        bot.send_message(user_id, "📸 Пожалуйста, отправьте скрин оплаты в этот чат.")
+        bot.send_message(ADMIN_ID, f"🔔 Новое платное объявление от @{message.from_user.username or user_id}:\n\n{text}")
+    else:
+        bot.send_message(CHANNEL_ID, text)
+        msg = "✅ Хабарландыру сақталды." if lang == "kz" else "✅ Объявление опубликовано."
+        bot.send_message(user_id, msg, reply_markup=main_menu(lang))
 
-@bot.message_handler(func=lambda m: m.text in ["📋 Мои объявления", "📋 Менің хабарландыруларым"])
-def my_ads(message):
-    cursor.execute("SELECT text FROM ads WHERE user_id = ?", (message.from_user.id,))
+def show_user_ads(message, lang):
+    cursor.execute("SELECT id, text FROM ads WHERE user_id = ?", (message.from_user.id,))
     ads = cursor.fetchall()
     if not ads:
-        bot.send_message(message.chat.id, get_text(message.from_user.id, "У вас нет объявлений.", "Сізде хабарландыру жоқ."))
+        msg = "Сізде хабарландырулар жоқ." if lang == "kz" else "У вас нет объявлений."
     else:
-        for ad in ads:
-            bot.send_message(message.chat.id, ad[0])
+        msg = "\n\n".join([f"🆔 {ad[0]}:\n{ad[1]}" for ad in ads])
+    bot.send_message(message.chat.id, msg)
 
-@bot.message_handler(func=lambda m: m.text in ["ℹ️ Помощь", "ℹ️ Көмек"])
-def help_message(message):
-    text = get_text(message.from_user.id,
-        "ℹ️ Чтобы добавить объявление, выберите категорию и отправьте текст.\nПлатные объявления публикуются в канале.",
-        "ℹ️ Хабарландыру қосу үшін санатты таңдап, мәтінді жіберіңіз.\nАқылы хабарландырулар арнада жарияланады.")
-    bot.send_message(message.chat.id, text)
-
-# 🔧 Админ-панель
-@bot.message_handler(func=lambda m: m.text == "🔧 Админ-панель")
+# 🔒 Админ-панель
+@bot.message_handler(commands=['admin'])
 def admin_panel(message):
     if message.from_user.id != ADMIN_ID:
         return
@@ -176,4 +193,5 @@ def delete_ad(message):
         bot.send_message(message.chat.id, "❗ Использование: /delete [ID]")
 
 # 🟢 Запуск
+keep_alive()
 bot.polling(non_stop=True)

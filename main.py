@@ -9,7 +9,7 @@ from threading import Thread
 TOKEN = os.getenv("TOKEN")
 bot = telebot.TeleBot(TOKEN)
 
-# Админ ID для получения скринов
+# Админ ID для управления ботом
 ADMIN_ID = 6864791335  # ← замени на свой Telegram ID
 CHANNEL_ID = "@kyzylorda_helper_channel"
 KASPI_CARD = "4400430247434142"
@@ -29,7 +29,7 @@ def keep_alive():
     t = Thread(target=run_flask)
     t.start()
 
-# Подключение к БД
+# Подключение к SQLite
 conn = sqlite3.connect('ads.db', check_same_thread=False)
 cursor = conn.cursor()
 
@@ -147,5 +147,52 @@ def show_user_ads(message, lang):
         msg = "\n\n".join([f"🆔 {ad[0]}:\n{ad[1]}" for ad in ads])
     bot.send_message(message.chat.id, msg)
 
+# 🔒 Админ-панель
+@bot.message_handler(commands=['admin'])
+def admin_panel(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("📋 Все объявления", callback_data="admin_all_ads"))
+    markup.add(types.InlineKeyboardButton("❌ Удалить объявление", callback_data="admin_delete"))
+    markup.add(types.InlineKeyboardButton("🔄 Обновить", callback_data="admin_refresh"))
+    bot.send_message(message.chat.id, "🔐 Админ-панель:", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("admin_"))
+def handle_admin_panel(call):
+    if call.from_user.id != ADMIN_ID:
+        return
+
+    if call.data == "admin_all_ads":
+        cursor.execute("SELECT id, user_id, text, is_paid FROM ads")
+        ads = cursor.fetchall()
+        if not ads:
+            bot.send_message(call.message.chat.id, "❌ Объявлений нет.")
+        else:
+            result = ""
+            for ad in ads:
+                paid = "💰" if ad[3] else ""
+                result += f"🆔 {ad[0]} | 👤 {ad[1]} {paid}\n{ad[2]}\n\n"
+            bot.send_message(call.message.chat.id, result[:4096])
+
+    elif call.data == "admin_delete":
+        bot.send_message(call.message.chat.id, "✏️ Напиши команду: `/delete ID`", parse_mode="Markdown")
+
+    elif call.data == "admin_refresh":
+        admin_panel(call.message)
+
+@bot.message_handler(commands=['delete'])
+def delete_ad(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    try:
+        ad_id = int(message.text.split()[1])
+        cursor.execute("DELETE FROM ads WHERE id = ?", (ad_id,))
+        conn.commit()
+        bot.send_message(message.chat.id, f"✅ Объявление {ad_id} удалено.")
+    except:
+        bot.send_message(message.chat.id, "❗ Использование: /delete [ID]")
+
+# 🟢 Запуск
 keep_alive()
 bot.polling(non_stop=True)

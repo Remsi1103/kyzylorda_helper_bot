@@ -47,16 +47,20 @@ conn.commit()
 user_lang = {}
 pending_paid_ads = {}
 
-def main_menu(lang):
+def main_menu(lang, user_id=None):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     if lang == "kz":
         markup.row("📢 Жұмыс", "🏠 Жалдау")
         markup.row("➕ Хабарландыру қосу", "📋 Менің хабарландыруларым")
         markup.row("ℹ️ Көмек", "💰 Ақылы хабарландыру")
+        if user_id == ADMIN_ID:
+            markup.row("🛠 Админ-панель")
     else:
         markup.row("📢 Вакансии", "🏠 Аренда")
         markup.row("➕ Добавить объявление", "📋 Мои объявления")
         markup.row("ℹ️ Помощь", "💰 Платное объявление")
+        if user_id == ADMIN_ID:
+            markup.row("🛠 Админ-панель")
     return markup
 
 @bot.message_handler(commands=['start'])
@@ -71,7 +75,7 @@ def choose_language(call):
     lang = call.data.split("_")[1]
     user_lang[call.from_user.id] = lang
     text = "✅ Қазақ тілі таңдалды." if lang == "kz" else "✅ Русский язык выбран."
-    bot.send_message(call.message.chat.id, text, reply_markup=main_menu(lang))
+    bot.send_message(call.message.chat.id, text, reply_markup=main_menu(lang, call.from_user.id))
 
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
@@ -103,8 +107,10 @@ def handle_text(message):
             show_user_ads(message, lang)
         elif text == "ℹ️ Көмек":
             bot.send_message(message.chat.id, "Бұл бот арқылы сіз хабарландырулар қосып, көруіңізге болады.")
+        elif text == "🛠 Админ-панель" and message.from_user.id == ADMIN_ID:
+            admin_panel(message)
         else:
-            bot.send_message(message.chat.id, "Түсінбедім. Басты мәзірден таңдаңыз.", reply_markup=main_menu(lang))
+            bot.send_message(message.chat.id, "Түсінбедім. Басты мәзірден таңдаңыз.", reply_markup=main_menu(lang, message.from_user.id))
     else:
         if text == "📢 Вакансии":
             bot.send_message(message.chat.id, "Здесь будут отображаться вакансии.")
@@ -121,8 +127,10 @@ def handle_text(message):
             show_user_ads(message, lang)
         elif text == "ℹ️ Помощь":
             bot.send_message(message.chat.id, "С помощью этого бота вы можете размещать и просматривать объявления.")
+        elif text == "🛠 Админ-панель" and message.from_user.id == ADMIN_ID:
+            admin_panel(message)
         else:
-            bot.send_message(message.chat.id, "Я не понял. Выберите из меню.", reply_markup=main_menu(lang))
+            bot.send_message(message.chat.id, "Я не понял. Выберите из меню.", reply_markup=main_menu(lang, message.from_user.id))
 
 def save_ad(message, lang, is_paid):
     user_id = message.from_user.id
@@ -136,7 +144,7 @@ def save_ad(message, lang, is_paid):
     else:
         bot.send_message(CHANNEL_ID, text)
         msg = "✅ Хабарландыру сақталды." if lang == "kz" else "✅ Объявление опубликовано."
-        bot.send_message(user_id, msg, reply_markup=main_menu(lang))
+        bot.send_message(user_id, msg, reply_markup=main_menu(lang, user_id))
 
 def show_user_ads(message, lang):
     cursor.execute("SELECT id, text FROM ads WHERE user_id = ?", (message.from_user.id,))

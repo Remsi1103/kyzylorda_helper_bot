@@ -10,7 +10,7 @@ TOKEN = os.getenv("TOKEN")
 bot = telebot.TeleBot(TOKEN)
 
 # Админ ID для управления ботом
-ADMIN_ID = 6864791335  # ← замени на свой Telegram ID
+ADMIN_ID = 6864791335  
 CHANNEL_ID = "@kyzylorda_helper_channel"
 KASPI_CARD = "4400430247434142"
 PRICE = 500

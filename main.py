@@ -10,7 +10,7 @@ from threading import Thread
 TOKEN = os.getenv("TOKEN")
 bot = telebot.TeleBot(TOKEN)
 
-ADMIN_ID = 6864791335  # ← замени на свой
+ADMIN_ID = 6864791335
 CHANNEL_ID = "@kyzylorda_helper_channel"
 KASPI_CARD = "4400430247434142"
 PRICE = 500
@@ -105,8 +105,10 @@ def handle_post_id(message):
 def show_ads(message):
     lang = user_language.get(message.chat.id, 'ru')
     category_map = {
-        "📢 Вакансии": "Вакансии", "📢 Жұмыс": "Вакансии",
-        "🏠 Аренда": "Аренда", "🏠 Жалға беру": "Аренда"
+        "📢 Вакансии": "Вакансии",
+        "📢 Жұмыс": "Вакансии",
+        "🏠 Аренда": "Аренда",
+        "🏠 Жалға беру": "Аренда"
     }
     category = category_map.get(message.text)
     conn = sqlite3.connect('ads.db')
@@ -115,8 +117,8 @@ def show_ads(message):
     results = cursor.fetchall()
     conn.close()
     if not results:
-        text = "Пока нет объявлений в этой категории." if lang == 'ru' else "Бұл санатта хабарландырулар жоқ."
-        bot.send_message(message.chat.id, text)
+        msg = "Пока нет объявлений в этой категории." if lang == 'ru' else "Бұл санатта жарияланған хабарландырулар жоқ."
+        bot.send_message(message.chat.id, msg)
     else:
         for ad in results:
             bot.send_message(message.chat.id, f"📢 {ad[0]}\n\n{ad[1]}\n\n📞 {ad[2]}")
@@ -125,18 +127,30 @@ def show_ads(message):
 def add_ad(message):
     lang = user_language.get(message.chat.id, 'ru')
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("📢 Вакансии" if lang == 'ru' else "📢 Жұмыс", 
-               "🏠 Аренда" if lang == 'ru' else "🏠 Жалға беру")
-    text = "Выберите категорию объявления:" if lang == 'ru' else "Хабарландыру санатын таңдаңыз:"
+    markup.add("Вакансии" if lang == 'ru' else "Жұмыс", "Аренда" if lang == 'ru' else "Жалға беру")
+    text = "Выберите категорию для нового объявления:" if lang == 'ru' else "Жаңа хабарландыру санатын таңдаңыз:"
     msg = bot.send_message(message.chat.id, text, reply_markup=markup)
-    bot.register_next_step_handler(msg, get_category)
+    bot.register_next_step_handler(msg, get_category_for_add)
 
-def get_category(message):
-    user_data[message.chat.id] = {'category': message.text}
+def get_category_for_add(message):
+    category_map = {
+        "Вакансии": "Вакансии",
+        "Жұмыс": "Вакансии",
+        "Аренда": "Аренда",
+        "Жалға беру": "Аренда"
+    }
+
+    if message.text not in category_map:
+        bot.send_message(message.chat.id, "❌ Неверная категория.")
+        return
+
+    user_data[message.chat.id] = {'category': category_map[message.text]}
     lang = user_language.get(message.chat.id, 'ru')
-    text = ("Введите объявление в формате:\nЗаголовок\nОписание\nКонтактный телефон" 
-            if lang == 'ru' else 
-            "Хабарландыруды келесі форматта жазыңыз:\nТақырып\nСипаттама\nБайланыс нөмірі")
+    text = ("✏️ Введите заголовок, описание и телефон одним сообщением.\n\n"
+            "Пример:\nПродавец в магазин\nОпыт не обязателен. График 2/2\n87071234567"
+            if lang == 'ru' else
+            "✏️ Тақырып, сипаттама және телефон нөмірін бір хабарламада жазыңыз.\n\n"
+            "Мысал:\nДүкенге сатушы керек\nТәжірибе міндетті емес. График 2/2\n87071234567")
     msg = bot.send_message(message.chat.id, text)
     bot.register_next_step_handler(msg, get_ad_details)
 
